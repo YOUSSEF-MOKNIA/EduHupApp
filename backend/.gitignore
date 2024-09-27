@@ -1,0 +1,33 @@
+# Ignore Python bytecode files
+*.pyc
+__pycache__/
+
+# Ignore environment files
+.env
+venv/
+env/
+*.egg-info/
+*.log
+
+# Ignore OS-specific files
+.DS_Store
+
+# Ignore compiled Cython files
+*.so
+
+# Ignore database files
+*.sqlite3
+
+# Ignore cache and logs
+*.log
+*.cache
+
+# Ignore IDE-specific files (if you use them)
+.vscode/
+.idea/
+
+# Ignore S3 credentials or other AWS-specific config
+.aws/
+
+# Ignore Docker-related files (if using Docker)
+docker-compose.override.yml

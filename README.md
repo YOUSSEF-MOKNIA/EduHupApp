@@ -1,3 +1,1 @@
-"# EDUHUB" 
-"# EDUHUB" 
-"# EDUHUB" 
+"# EduHupApp" 
