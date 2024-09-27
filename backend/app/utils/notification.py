@@ -20,7 +20,7 @@ async def create_notification_for_group_members(member_emails: list, content: st
             "content": content,
             "type": "group",
             "read": False,
-            
+             
             "timestamp": datetime.utcnow(),
         }
         notifications.append(notification)
