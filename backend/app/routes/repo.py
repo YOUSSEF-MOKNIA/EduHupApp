@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from schemas.repo import AddFileToDirectory, DirectoryCreate, FileCreate, RepoCreate, RepoUpdate
 from database.session import db
 from routes.auth import get_current_user
-from models.repo import RepoInDB
+from models.repo import FileInDB, RepoInDB
 from bson import ObjectId
 from datetime import datetime
 from dotenv import load_dotenv
@@ -80,6 +80,76 @@ async def create_repo(repo: RepoCreate, current_user: dict = Depends(get_current
 
     return response_message
 
+# pin repo maximum 6
+@router.put("/pin/{repo_id}", response_model=dict)
+async def pin_repo(repo_id: str, current_user: dict = Depends(get_current_user)):
+    # Fetch the repo to ensure it exists
+    repo = await db["repositories"].find_one({"_id": ObjectId(repo_id)})
+    
+    if not repo:
+        raise HTTPException(status_code=404, detail="Repo not found")
+
+    # Check if the repo is already pinned by the user
+    if repo_id in current_user["pinned_repos"]:
+        raise HTTPException(status_code=400, detail="Repo already pinned")
+
+    # Check if the user has already pinned 5 repos
+    if len(current_user["pinned_repos"]) >= 5:
+        raise HTTPException(status_code=400, detail="You can only pin a maximum of 5 repos")
+
+    # Update the user's `pinned_repos`
+    await db["users"].update_one(
+        {"_id": ObjectId(current_user["id"])}, 
+        {"$push": {"pinned_repos": repo_id}}
+    )
+
+    return {
+        "message": "Repo pinned successfully"
+    }
+
+# unpin repo
+@router.put("/unpin/{repo_id}", response_model=dict)
+async def unpin_repo(repo_id: str, current_user: dict = Depends(get_current_user)):
+    # Fetch the repo to ensure it exists
+    repo = await db["repositories"].find_one({"_id": ObjectId(repo_id)})
+    
+    if not repo:
+        raise HTTPException(status_code=404, detail="Repo not found")
+
+    # Check if the repo is already pinned by the user
+    if repo_id not in current_user["pinned_repos"]:
+        raise HTTPException(status_code=400, detail="Repo not pinned")
+
+    # Update the user's `pinned_repos`
+    await db["users"].update_one(
+        {"_id": ObjectId(current_user["id"])}, 
+        {"$pull": {"pinned_repos": repo_id}}
+    )
+
+    return {
+        "message": "Repo unpinned successfully"
+    }
+
+
+# get pinned repos
+@router.get("/pinned", response_model=list)
+async def get_pinned_repos(current_user: dict = Depends(get_current_user)):
+    # Fetch all pinned repos by the user
+    pinned_repos = await db["repositories"].find({"_id": {"$in": [ObjectId(repo_id) for repo_id in current_user["pinned_repos"]]} }).to_list(length=5)
+    
+    # Prepare the response
+    response = []
+    for repo in pinned_repos:
+        response.append({
+            "id": str(repo["_id"]),
+            "name": repo["name"],
+            "owner_id": repo["owner_id"],
+            "members": repo["members"],
+            "files": repo["files"],
+            "created_at": repo["created_at"]
+        })
+
+    return response
 
 # Update group
 @router.put("/update/{repo_id}", response_model=dict)
@@ -257,30 +327,7 @@ async def get_all_repos(current_user: dict = Depends(get_current_user)):
 
     return response
 
-# get repo details
-@router.get("/{repo_id}", response_model=dict)
-async def get_repo(repo_id: str, current_user: dict = Depends(get_current_user)):
-    # Fetch the repo from the database
-    repo = await db["repositories"].find_one({"_id": ObjectId(repo_id)})
-    
-    if not repo:
-        raise HTTPException(status_code=404, detail="Repo not found")
 
-    # Check if the current user is a member of the repo
-    if current_user["email"] not in repo["members"]:
-        raise HTTPException(status_code=403, detail="You are not a member of this repo")
-
-    # Prepare the response
-    response = {
-        "name": repo["name"],
-        "owner_id": repo["owner_id"],
-        "members": repo["members"],
-        "files": repo["files"],
-        "directories": repo["directories"],
-        "created_at": repo["created_at"]
-    }
-
-    return response
 
 @router.post("/{repo_id}/add-directory", response_model=dict)
 async def add_directory(
@@ -356,9 +403,9 @@ async def add_file_to_repo(
     if not repo:
         raise HTTPException(status_code=404, detail="Repository not found or you don't have permission")
     
-    # Validate file type
-    if file.content_type not in ALLOWED_FILE_TYPES:
-        raise HTTPException(status_code=400, detail=f"File type '{file.content_type}' not allowed. Allowed types: {ALLOWED_FILE_TYPES}")
+    # # Validate file type
+    # if file.content_type not in ALLOWED_FILE_TYPES:
+    #     raise HTTPException(status_code=400, detail=f"File type '{file.content_type}' not allowed. Allowed types: {ALLOWED_FILE_TYPES}")
 
     # Validate file size
     file_size = await file.read()  # Read file content
@@ -392,10 +439,12 @@ async def add_file_to_repo(
         # Upload the file to S3 and get the URL
         file_url = await upload_file_to_s3(file)
 
+
         # Create a new file entry
         new_file_data = {
             "filename": file.filename,
-            "url": file_url
+            "url": file_url,
+            "added_at": datetime.utcnow()
         }
 
         # Append the file to the parent directory's files
@@ -413,7 +462,8 @@ async def add_file_to_repo(
         # Create a new file entry
         new_file_data = {
             "filename": file.filename,
-            "url": file_url
+            "url": file_url,
+            "added_at": datetime.utcnow()
         }
 
         # Append the file to the root level of the repository
@@ -428,7 +478,89 @@ async def add_file_to_repo(
 
     return {"message": "File added successfully"}
 
+# get recently added files for 48 hours
+# Helper function to collect all files in a repository (including subdirectories)
+def collect_all_files(repo):
+    all_files = []
 
+    # Add files from root
+    if repo.get("files"):
+        all_files.extend(repo["files"])
+
+    # Recursive function to collect files from directories
+    def collect_from_directory(directory):
+        if directory.get("files"):
+            all_files.extend(directory["files"])
+        for subdirectory in directory.get("subdirectories", []):
+            collect_from_directory(subdirectory)
+
+    # Add files from directories
+    for directory in repo.get("directories", []):
+        collect_from_directory(directory)
+
+    return all_files
+
+# New endpoint to get the 6 most recently added files
+@router.get("/recent-files", response_model=List[FileInDB])
+async def get_recent_files(current_user: dict = Depends(get_current_user)):
+    repos = await db["repositories"].find({"members": current_user["email"]}).to_list(length=5)
+
+    # Collect all files from all repositories
+    all_files = []
+    for repo in repos:
+        all_files.extend(collect_all_files(repo))
+
+    # Sort the files by added_at in descending order
+    sorted_files = sorted(all_files, key=lambda file: file["added_at"], reverse=True)
+
+    # Return the 6 most recently added files
+    return sorted_files[:5]
+
+# get repo details
+@router.get("/{repo_id}", response_model=dict)
+async def get_repo(repo_id: str, current_user: dict = Depends(get_current_user)):
+    # Fetch the repo from the database
+    repo = await db["repositories"].find_one({"_id": ObjectId(repo_id)})
+    
+    if not repo:
+        raise HTTPException(status_code=404, detail="Repo not found")
+
+    # Check if the current user is a member of the repo
+    if current_user["email"] not in repo["members"]:
+        raise HTTPException(status_code=403, detail="You are not a member of this repo")
+
+    # Prepare the response
+    response = {
+        "name": repo["name"],
+        "owner_id": repo["owner_id"],
+        "members": repo["members"],
+        "files": repo["files"],
+        "directories": repo["directories"],
+        "created_at": repo["created_at"]
+    }
+
+    return response
+
+# count the number of documents in a repository
+@router.get("/{repo_id}/count", response_model=dict)
+async def count_repo_documents(repo_id: str, current_user: dict = Depends(get_current_user)):
+    # Find the repository by its ID
+    repo = await db["repositories"].find_one({"_id": ObjectId(repo_id)})
+
+    if not repo:
+        raise HTTPException(status_code=404, detail="Repository not found")
+
+    # Check if the current user is a member of the repository
+    if current_user["email"] not in repo["members"]:
+        raise HTTPException(status_code=403, detail="You are not a member of this repository")
+
+    # Count the number of files and directories in the repository
+    file_count = len(repo.get("files", []))
+    directory_count = len(repo.get("directories", []))
+    count = file_count + directory_count  # No need to cast to int as it's already an integer
+
+    # Return the count as a dictionary
+    return {"count": count}
 
 # delete directory
 @router.delete("/repo/{repo_id}/delete-directory", response_model=dict)

@@ -5,6 +5,8 @@ from datetime import datetime
 class FileInDB(BaseModel):
     filename: str
     url: str
+    added_at: Optional[datetime] = datetime.utcnow()  # New field to store file addition time
+
 
 class DirectoryInDB(BaseModel):
     name: str

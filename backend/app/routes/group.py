@@ -240,6 +240,76 @@ async def add_member_to_group(group_id: str, member_email: str, current_user: di
     
     return {"message": "Member added successfully to the group"}
 
+# pin group
+@router.put("/pin/{group_id}", response_model=dict)
+async def pin_group(group_id: str, current_user: dict = Depends(get_current_user)):
+    # Fetch the group from the database
+    group = await db["groups"].find_one({"_id": ObjectId(group_id)})
+    
+    if not group:
+        raise HTTPException(status_code=404, detail="Group not found")
+
+    # Check if the user is a member of the group
+    if current_user["email"] not in group["members"]:
+        raise HTTPException(status_code=403, detail="You are not a member of this group")
+
+    # Check if the group is already pinned
+    if group_id in current_user["pinned_groups"]:
+        raise HTTPException(status_code=400, detail="Group already pinned")
+
+    # Add the group to the user's pinned groups
+    await db["users"].update_one(
+        {"email": current_user["email"]},
+        {"$push": {"pinned_groups": group_id}}
+    )
+
+    return {"message": "Group pinned successfully"}
+
+# unpin group
+@router.put("/unpin/{group_id}", response_model=dict)
+async def unpin_group(group_id: str, current_user: dict = Depends(get_current_user)):
+    # Fetch the group from the database
+    group = await db["groups"].find_one({"_id": ObjectId(group_id)})
+    
+    if not group:
+        raise HTTPException(status_code=404, detail="Group not found")
+
+    # Check if the user is a member of the group
+    if current_user["email"] not in group["members"]:
+        raise HTTPException(status_code=403, detail="You are not a member of this group")
+
+    # Check if the group is already pinned
+    if group_id not in current_user["pinned_groups"]:
+        raise HTTPException(status_code=400, detail="Group not pinned")
+
+    # Remove the group from the user's pinned groups
+    await db["users"].update_one(
+        {"email": current_user["email"]},
+        {"$pull": {"pinned_groups": group_id}}
+    )
+
+    return {"message": "Group unpinned successfully"}
+
+# get pinned groups
+@router.get("/pinned", response_model=dict)
+async def get_pinned_groups(current_user: dict = Depends(get_current_user)):
+    # Fetch all pinned groups
+    pinned_groups = await db["groups"].find({"_id": {"$in": [ObjectId(group_id) for group_id in current_user["pinned_groups"]]}}).to_list(length=1000)
+
+    # Prepare the response message
+    response_message = []
+    for group in pinned_groups:
+        response_message.append({
+            "group_id": str(group["_id"]),
+            "name": group["name"],
+            "admin_id": group["admin_id"],
+            "members": group["members"],
+            "created_at": group["created_at"]
+        })
+    
+    # Wrap the list in a dictionary
+    return {"pinned_groups": response_message}
+
 # get group details
 @router.get("/details/{group_id}", response_model=dict)
 async def get_group(group_id: str, current_user: dict = Depends(get_current_user)):

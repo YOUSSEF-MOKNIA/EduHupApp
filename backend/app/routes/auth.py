@@ -16,7 +16,7 @@ from pydantic import EmailStr
 # JWT Secret and Algorithm from environment variables
 SECRET_KEY = os.getenv("SECRET_KEY")
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
+ACCESS_TOKEN_EXPIRE_MINUTES = 300
 
 # OAuth2 scheme for the token endpoint
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
@@ -75,17 +75,17 @@ async def register_user(
 
     # Save the user to the database
     new_user = await db["users"].insert_one(user_in_db.dict())
-
+    
     return {"message": "User registered successfully", "user_id": str(new_user.inserted_id)}
 
 # User login endpoint (Token generation)
 @router.post("/login", response_model=Token) 
-async def login_user(form_data: OAuth2PasswordRequestForm = Depends()):
+async def login_user(form_data: UserLogin):
      # Try to find the user by email or username
     user = await db["users"].find_one({
         "$or": [
-            # {"email": form_data.identifier},  # If identifier is email
-            {"username": form_data.username}  # If identifier is username
+            {"email": form_data.identifier},  # If identifier is email
+            {"username": form_data.identifier}  # If identifier is username
         ]
     })
     
@@ -138,6 +138,7 @@ def is_token_blacklisted(token: str):
 # Logout endpoint
 @router.post("/auth/logout", response_model=dict)
 async def logout_user(token: str = Depends(oauth2_scheme)):
+    
     if not token:
         raise HTTPException(status_code=400, detail="No token provided")
 

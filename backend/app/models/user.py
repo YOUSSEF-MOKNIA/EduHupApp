@@ -16,6 +16,8 @@ class UserInDB(BaseModel):
     owned_repos: List[str] = []  # List of repo IDs where the user is the admin
     member_groups: List[str] = []  # List of group IDs where the user is a member
     member_repos: List[str] = []  # List of repo IDs where the user is a member
+    pinned_repos: List[str] = []  # List of repo IDs that the user has
+    pinned_groups: List[str] = []  # List of group IDs that the user has
 
 # Conversion function (same as before, now also including the profile_picture_url)
 def user_db_to_response(user: dict) -> dict:
@@ -32,4 +34,6 @@ def user_db_to_response(user: dict) -> dict:
         "owned_repos": user["owned_repos"],
         "member_groups": user["member_groups"],
         "member_repos": user["member_repos"],
+        "pinned_repos": user["pinned_repos"],
+        "pinned_groups": user["pinned_groups"],
     }
